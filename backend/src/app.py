@@ -1,10 +1,21 @@
-from flask import Flask, jsonify
-from flask_cors import CORS
 import os
-from dotenv import load_dotenv
+import sys
+from pathlib import Path
 
-# Import routes
+# Add the src directory to the Python path
+src_path = str(Path(__file__).parent)
+if src_path not in sys.path:
+    sys.path.append(src_path)
+
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+from dotenv import load_dotenv
+from firebase_admin import firestore
+
+# Import routes and Firebase config
 from routes.maintenance_routes import maintenance_routes
+from firebase_config import initialize_firebase, get_firestore
+from middleware.auth_middleware import require_auth
 
 # Load environment variables
 load_dotenv()
@@ -15,14 +26,74 @@ def create_app():
     # Configure CORS
     CORS(app, resources={
         r"/api/*": {
-            "origins": ["http://localhost:3000"],  # Your React frontend URL
+            "origins": "*",  # Allow all origins during development
             "methods": ["GET", "POST", "PUT", "DELETE"],
-            "allow_headers": ["Content-Type"]
+            "allow_headers": ["Content-Type", "Authorization"]
         }
     })
 
+    # Initialize Firebase
+    try:
+        db = initialize_firebase()
+        print("Firebase initialized successfully")
+    except Exception as e:
+        print(f"Failed to initialize Firebase: {str(e)}")
+        raise
+
+    # Test route to verify Firebase connection
+    @app.route('/api/test/firebase', methods=['GET'])
+    def test_firebase():
+        try:
+            db = get_firestore()
+            # Try to create a test document
+            test_ref = db.collection('test').document('connection_test')
+            test_ref.set({
+                'timestamp': firestore.SERVER_TIMESTAMP,
+                'status': 'success'
+            })
+            return jsonify({
+                'status': 'success',
+                'message': 'Firebase connection successful!'
+            })
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': f'Firebase connection failed: {str(e)}'
+            }), 500
+
+    # Test route to verify Firebase Authentication
+    @app.route('/api/test/auth', methods=['GET'])
+    @require_auth
+    def test_auth():
+        return jsonify({
+            'status': 'success',
+            'message': 'Authentication successful!',
+            'user': {
+                'uid': request.user['uid'],
+                'email': request.user.get('email', 'No email found')
+            }
+        })
+
     # Register blueprints
     app.register_blueprint(maintenance_routes, url_prefix='/api/maintenance')
+
+    # Example authenticated route
+    @app.route('/api/user/profile', methods=['GET'])
+    @require_auth
+    def get_user_profile():
+        user_id = request.user['uid']
+        db = get_firestore()
+        
+        # Get user document from Firestore
+        user_doc = db.collection('users').document(user_id).get()
+        
+        if not user_doc.exists:
+            return jsonify({
+                'error': 'User profile not found',
+                'status': 404
+            }), 404
+        
+        return jsonify(user_doc.to_dict())
 
     # Error handlers
     @app.errorhandler(404)
