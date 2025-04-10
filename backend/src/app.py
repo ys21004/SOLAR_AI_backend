@@ -14,6 +14,7 @@ from firebase_admin import firestore
 
 # Import routes and Firebase config
 from routes.maintenance_routes import maintenance_routes
+from routes.auth_routes import auth_routes
 from firebase_config import initialize_firebase, get_firestore
 from middleware.auth_middleware import require_auth
 
@@ -39,6 +40,10 @@ def create_app():
     except Exception as e:
         print(f"Failed to initialize Firebase: {str(e)}")
         raise
+
+    # Register blueprints
+    app.register_blueprint(maintenance_routes, url_prefix='/api/maintenance')
+    app.register_blueprint(auth_routes, url_prefix='/api/auth')
 
     # Test route to verify Firebase connection
     @app.route('/api/test/firebase', methods=['GET'])
@@ -73,9 +78,6 @@ def create_app():
                 'email': request.user.get('email', 'No email found')
             }
         })
-
-    # Register blueprints
-    app.register_blueprint(maintenance_routes, url_prefix='/api/maintenance')
 
     # Example authenticated route
     @app.route('/api/user/profile', methods=['GET'])
